@@ -49,7 +49,7 @@
     - name: Display cluster information
       debug:
         msg: |
-          ✅ Kubernetes cluster deployment completed successfully!
+          Kubernetes cluster deployment completed successfully!
           
           🔧 Cluster Configuration:
           - VIP: {{ kube_vip_ip }}:6443
@@ -57,7 +57,7 @@
           - Workers: {{ groups['workers'] | length }}
           - CNI: Calico v3.29.4
           
-          📋 Next Steps:
+          Next Steps:
           1. Copy kubeconfig: scp root@{{ groups['masters'][0] }}:/etc/kubernetes/admin.conf ~/.kube/config
           2. Verify cluster: kubectl get nodes
           3. Deploy applications: kubectl apply -f your-app.yaml

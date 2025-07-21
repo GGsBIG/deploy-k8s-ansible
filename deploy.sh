@@ -54,7 +54,7 @@ deploy_full() {
     run_stage 9 "Finalize Cluster" "playbooks/09-finalize-cluster.yml"
     
     echo ""
-    echo "🎉 Deployment completed successfully!"
+    echo "Deployment completed successfully!"
     echo "To access the cluster, copy the kubeconfig from master-01:/etc/kubernetes/admin.conf"
 }
 
