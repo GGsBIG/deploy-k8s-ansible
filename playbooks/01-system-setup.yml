@@ -9,12 +9,24 @@
       timezone:
         name: Asia/Taipei
 
-    - name: Wait for dpkg lock to be released
+    - name: Kill unattended-upgrades and wait for dpkg lock
       shell: |
-        while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-          echo "Waiting for dpkg lock to be released..."
-          sleep 10
+        # Kill unattended-upgrades processes
+        sudo pkill -f unattended-upgrade || true
+        sudo pkill -f apt.systemd.daily || true
+        
+        # Wait for processes to finish and release locks
+        timeout=300
+        while [ $timeout -gt 0 ] && (sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || sudo fuser /var/lib/dpkg/lock >/dev/null 2>&1); do
+          echo "Waiting for dpkg lock to be released... ($timeout seconds remaining)"
+          sleep 5
+          timeout=$((timeout-5))
         done
+        
+        # Force remove lock files if still present
+        sudo rm -f /var/lib/dpkg/lock-frontend
+        sudo rm -f /var/lib/dpkg/lock
+        sudo dpkg --configure -a || true
       ignore_errors: yes
 
     - name: Install chrony
