@@ -1,0 +1,44 @@
+---
+- name: "Stage 6: Network Setup"
+  hosts: masters[0]
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    - name: Deploy Calico CNI (v3.29.4)
+      shell: |
+        curl -sL https://raw.githubusercontent.com/projectcalico/calico/v3.29.4/manifests/calico.yaml | \
+        kubectl apply -f -
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+
+    - name: Wait for Calico pods to be ready
+      shell: kubectl get pods -n kube-system -l k8s-app=calico-node --no-headers
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: calico_pods
+      until: calico_pods.stdout_lines | length > 0 and "Running" in calico_pods.stdout
+      retries: 30
+      delay: 10
+
+    - name: Verify cluster status
+      shell: kubectl get pods -A
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: all_pods
+
+    - name: Display cluster pods status
+      debug:
+        var: all_pods.stdout_lines
+
+    - name: Fix kube-vip manifest permissions after cluster init
+      replace:
+        path: /etc/kubernetes/manifests/kube-vip.yaml
+        regexp: 'path: /etc/kubernetes/super-admin.conf'
+        replace: 'path: /etc/kubernetes/admin.conf'
+
+    - name: Restart kubelet service
+      systemd:
+        name: kubelet
+        state: restarted
+        daemon_reload: yes

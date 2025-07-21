@@ -1,0 +1,42 @@
+---
+- name: "Stage 4: Kube-VIP Setup"
+  hosts: masters
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    - name: Create kubernetes manifests directory
+      file:
+        path: /etc/kubernetes/manifests
+        state: directory
+        mode: '0755'
+
+    - name: Get latest kube-vip version
+      uri:
+        url: https://api.github.com/repos/kube-vip/kube-vip/releases/latest
+        return_content: yes
+      register: kube_vip_release
+
+    - name: Set kube-vip version variable
+      set_fact:
+        kube_vip_version: "{{ (kube_vip_release.content | from_json).name }}"
+
+    - name: Pull kube-vip image
+      shell: |
+        ctr -n k8s.io image pull ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }}
+
+    - name: Generate kube-vip manifest
+      shell: |
+        ctr -n k8s.io run --rm --net-host ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }} vip /kube-vip manifest pod \
+          --address {{ kube_vip_ip }} \
+          --interface {{ kube_vip_interface }} \
+          --controlplane \
+          --arp \
+          --leaderElection > /etc/kubernetes/manifests/kube-vip.yaml
+
+    - name: Adjust kube-vip manifest for first master (Kubernetes 1.29+)
+      replace:
+        path: /etc/kubernetes/manifests/kube-vip.yaml
+        regexp: 'path: /etc/kubernetes/admin.conf'
+        replace: 'path: /etc/kubernetes/super-admin.conf'
+      when: inventory_hostname == groups['masters'][0]

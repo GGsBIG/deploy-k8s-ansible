@@ -1,0 +1,122 @@
+---
+- name: "Stage 2: Container Runtime Setup"
+  hosts: k8s_nodes
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - jq
+          - curl
+        state: present
+        update_cache: yes
+
+    - name: Download containerd binary
+      get_url:
+        url: "https://github.com/containerd/containerd/releases/download/v{{ containerd_version }}/containerd-{{ containerd_version }}-linux-amd64.tar.gz"
+        dest: "/tmp/containerd-{{ containerd_version }}-linux-amd64.tar.gz"
+        mode: '0644'
+
+    - name: Download containerd service file
+      get_url:
+        url: "https://raw.githubusercontent.com/containerd/containerd/main/containerd.service"
+        dest: "/tmp/containerd.service"
+        mode: '0644'
+
+    - name: Extract containerd binary
+      unarchive:
+        src: "/tmp/containerd-{{ containerd_version }}-linux-amd64.tar.gz"
+        dest: /usr/local
+        remote_src: yes
+        creates: /usr/local/bin/containerd
+
+    - name: Create systemd directory for containerd
+      file:
+        path: /usr/local/lib/systemd/system
+        state: directory
+        mode: '0755'
+
+    - name: Install containerd service file
+      copy:
+        src: /tmp/containerd.service
+        dest: /usr/local/lib/systemd/system/containerd.service
+        remote_src: yes
+        mode: '0644'
+
+    - name: Enable and start containerd
+      systemd:
+        name: containerd
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    # 下載 runc
+    - name: Download runc binary
+      get_url:
+        url: "https://github.com/opencontainers/runc/releases/download/v1.3.0/runc.amd64"
+        dest: "/tmp/runc.amd64"
+        mode: '0755'
+
+    - name: Install runc binary
+      copy:
+        src: /tmp/runc.amd64
+        dest: /usr/local/sbin/runc
+        remote_src: yes
+        mode: '0755'
+        owner: root
+        group: root
+
+    # 下載 CNI 插件
+    - name: Create CNI bin directory
+      file:
+        path: /opt/cni/bin
+        state: directory
+        mode: '0755'
+
+    - name: Download CNI plugins
+      get_url:
+        url: "https://github.com/containernetworking/plugins/releases/download/v1.7.1/cni-plugins-linux-amd64-v1.7.1.tgz"
+        dest: "~/cni-plugins.tgz"
+        mode: '0644'
+
+    - name: Extract CNI plugins
+      unarchive:
+        src: ~/cni-plugins.tgz
+        dest: /opt/cni/bin
+        remote_src: yes
+        creates: /opt/cni/bin/bridge
+
+    # 配置 containerd
+    - name: Create containerd config directory
+      file:
+        path: /etc/containerd
+        state: directory
+        mode: '0755'
+
+    - name: Generate default containerd configuration
+      shell: containerd config default > /etc/containerd/config.toml
+      args:
+        creates: /etc/containerd/config.toml
+
+    - name: Configure containerd to use systemd cgroup driver
+      replace:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        replace: 'SystemdCgroup = true'
+
+    - name: Restart containerd
+      systemd:
+        name: containerd
+        state: restarted
+
+    - name: Clean up downloaded files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/containerd-{{ containerd_version }}-linux-amd64.tar.gz"
+        - "/tmp/containerd.service"
+        - "/tmp/runc.amd64"
+        - "~/cni-plugins.tgz"

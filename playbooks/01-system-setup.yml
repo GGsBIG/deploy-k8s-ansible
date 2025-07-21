@@ -1,0 +1,76 @@
+---
+- name: "Stage 1: System Setup"
+  hosts: k8s_nodes
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    - name: Set timezone to Asia/Taipei
+      timezone:
+        name: Asia/Taipei
+
+    - name: Install chrony
+      apt:
+        name: chrony
+        state: present
+        update_cache: yes
+
+    - name: Enable chrony service
+      systemd:
+        name: chrony
+        enabled: yes
+
+    - name: Comment out default Ubuntu NTP pools
+      replace:
+        path: /etc/chrony/chrony.conf
+        regexp: '^(pool.*ubuntu.*$)'
+        replace: '#\1'
+
+    - name: Add Google NTP server
+      lineinfile:
+        path: /etc/chrony/chrony.conf
+        line: 'server time.google.com prefer'
+        state: present
+
+    - name: Restart chrony
+      systemd:
+        name: chrony
+        state: restarted
+        daemon_reload: yes
+
+    - name: Disable swap immediately
+      command: swapoff -a
+      ignore_errors: yes
+
+    - name: Comment out swap entries in /etc/fstab
+      replace:
+        path: /etc/fstab
+        regexp: '^([^#].*swap.*$)'
+        replace: '#\1'
+
+    - name: Load kernel modules
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - overlay
+        - br_netfilter
+
+    - name: Create k8s.conf for kernel modules
+      copy:
+        content: |
+          overlay
+          br_netfilter
+        dest: /etc/modules-load.d/k8s.conf
+
+    - name: Create sysctl configuration for Kubernetes
+      copy:
+        content: |
+          net.bridge.bridge-nf-call-iptables  = 1
+          net.ipv4.ip_forward                 = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+        dest: /etc/sysctl.d/99-kubernetes-cri.conf
+
+    - name: Apply sysctl settings
+      command: sysctl --system
+

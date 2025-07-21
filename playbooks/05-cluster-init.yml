@@ -1,0 +1,76 @@
+---
+- name: "Stage 5: Cluster Initialization"
+  hosts: masters[0]
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    - name: Create kubeadm init configuration file
+      template:
+        src: ../templates/init-config.yaml.j2
+        dest: /tmp/init-config.yaml
+        mode: '0644'
+
+    - name: Initialize Kubernetes cluster
+      shell: kubeadm init --upload-certs --config=/tmp/init-config.yaml
+      args:
+        creates: /etc/kubernetes/admin.conf
+      register: kubeadm_init_result
+
+    - name: Create .kube directory for root
+      file:
+        path: /root/.kube
+        state: directory
+        mode: '0755'
+
+    - name: Copy admin.conf to root's .kube/config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /root/.kube/config
+        remote_src: yes
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Create .kube directory for ansible user
+      file:
+        path: "/home/{{ ansible_user }}/.kube"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Copy admin.conf to ansible user's .kube/config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "/home/{{ ansible_user }}/.kube/config"
+        remote_src: yes
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+
+    - name: Get master join command with certificate key
+      shell: |
+        CERT_KEY=$(kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -1)
+        kubeadm token create --print-join-command --certificate-key $CERT_KEY
+      register: master_join_command
+
+    - name: Get worker join command
+      shell: kubeadm token create --print-join-command
+      register: worker_join_command
+
+    - name: Save join commands to local files
+      copy:
+        content: "{{ item.content }}"
+        dest: "/tmp/{{ item.filename }}"
+        mode: '0644'
+      loop:
+        - { content: "{{ master_join_command.stdout }}", filename: "master_join_command" }
+        - { content: "{{ worker_join_command.stdout }}", filename: "worker_join_command" }
+      delegate_to: localhost
+
+    - name: Display join commands
+      debug:
+        msg: |
+          Master join command: {{ master_join_command.stdout }}
+          Worker join command: {{ worker_join_command.stdout }}

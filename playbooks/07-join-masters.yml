@@ -1,0 +1,57 @@
+---
+- name: "Stage 7: Join Additional Master Nodes"
+  hosts: masters[1:]
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    - name: Read master join command from local file
+      slurp:
+        src: /tmp/master_join_command
+      register: master_join_command_file
+      delegate_to: localhost
+
+    - name: Set master join command variable
+      set_fact:
+        master_join_command: "{{ master_join_command_file.content | b64decode | trim }}"
+
+    - name: Check if node is already part of cluster
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf
+
+    - name: Join master node to cluster
+      shell: "{{ master_join_command }}"
+      when: not kubelet_conf.stat.exists
+
+    - name: Create .kube directory for root
+      file:
+        path: /root/.kube
+        state: directory
+        mode: '0755'
+
+    - name: Copy admin.conf to root's .kube/config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /root/.kube/config
+        remote_src: yes
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Create .kube directory for ansible user
+      file:
+        path: "/home/{{ ansible_user }}/.kube"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Copy admin.conf to ansible user's .kube/config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "/home/{{ ansible_user }}/.kube/config"
+        remote_src: yes
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'

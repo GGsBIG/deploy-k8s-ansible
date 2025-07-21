@@ -1,0 +1,63 @@
+---
+- name: "Stage 3: Kubernetes Installation"
+  hosts: k8s_nodes
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gpg
+        state: present
+        update_cache: yes
+
+    - name: Create keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Add Kubernetes GPG key
+      shell: |
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/Release.key | \
+        gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    - name: Add Kubernetes repository
+      copy:
+        content: 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/ /'
+        dest: /etc/apt/sources.list.d/kubernetes.list
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install Kubernetes packages on masters
+      apt:
+        name:
+          - kubelet=1.31.4-1.1
+          - kubeadm=1.31.4-1.1
+          - kubectl=1.31.4-1.1
+        state: present
+      when: inventory_hostname in groups['masters']
+
+    - name: Install Kubernetes packages on workers
+      apt:
+        name:
+          - kubelet=1.31.4-1.1
+          - kubeadm=1.31.4-1.1
+        state: present
+      when: inventory_hostname in groups['workers']
+
+    - name: Hold Kubernetes packages on masters
+      shell: apt-mark hold kubelet kubeadm kubectl
+      when: inventory_hostname in groups['masters']
+
+    - name: Hold Kubernetes packages on workers
+      shell: apt-mark hold kubelet kubeadm
+      when: inventory_hostname in groups['workers']
