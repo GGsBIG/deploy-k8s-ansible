@@ -1,8 +1,51 @@
 # Kubernetes Cluster Deployment
 
-自動化部署 Kubernetes 高可用叢集的 Ansible 腳本
+Automated deployment of high-availability Kubernetes cluster using Ansible scripts
 
-## 叢集架構
+## Deployment Steps
+
+### 1. Configure Inventory
+```bash
+# Edit the main inventory file with your VM information
+vim /deploy-k8s-ansible/inventory.ini
+
+# Example configuration:
+# [masters]
+# master-01 ansible_host=172.21.169.51 hostname=master-01
+# master-02 ansible_host=172.21.169.52 hostname=master-02
+# master-03 ansible_host=172.21.169.53 hostname=master-03
+#
+# [workers]
+# worker-01 ansible_host=172.21.169.61 hostname=worker-01
+# worker-02 ansible_host=172.21.169.62 hostname=worker-02
+#
+# [all:vars]
+# ansible_user=systex
+# ansible_become_pass=Systex123!
+# ansible_ssh_private_key_file=~/.ssh/id_rsa
+```
+
+### 2. Execute SSH Setup Script
+```bash
+# Grant execution permission
+chmod +x /deploy-k8s-ansible/setup-ssh/setup_ssh.sh
+
+# Execute on the virtual machine where the script will run
+cd /deploy-k8s-ansible/setup-ssh
+./setup_ssh.sh
+```
+
+### 3. Start Kubernetes Cluster Deployment
+```bash
+# Grant execution permission to deployment script
+chmod +x /deploy-k8s-ansible/deploy.sh
+
+# Start cluster deployment
+cd /deploy-k8s-ansible
+./deploy.sh
+```
+
+## Cluster Architecture
 
 - **VIP**: 10.10.7.236 (kube-vip)
 - **Master Nodes**: 
@@ -13,90 +56,92 @@
   - worker-01: 10.10.7.233
   - worker-02: 10.10.7.234
 
-## 部署階段
+## Deployment Stages
 
-### Stage 1: 系統設定 (01-system-setup.yml)
-- 設定台灣時區
-- 安裝與設定 chrony 時間同步
-- 關閉 swap
-- 載入 kernel 模組
-- 設定 sysctl 參數
+### Stage 1: System Setup (01-system-setup.yml)
+- Configure Taiwan timezone
+- Install and configure chrony time synchronization
+- Disable swap
+- Load kernel modules
+- Configure sysctl parameters
 
-### Stage 2: 容器運行時 (02-container-runtime.yml)
-- 安裝 containerd
-- 安裝 runc
-- 安裝 CNI plugins
-- 設定 containerd 與 crictl
+### Stage 2: Container Runtime (02-container-runtime.yml)
+- Install containerd
+- Install runc
+- Install CNI plugins
+- Configure containerd and crictl
 
-### Stage 3: Kubernetes 安裝 (03-kubernetes-install.yml)
-- 新增 Kubernetes APT repository
-- 安裝 kubelet, kubeadm, kubectl
-- 鎖定套件版本
+### Stage 3: Kubernetes Installation (03-kubernetes-install.yml)
+- Add Kubernetes APT repository
+- Install kubelet, kubeadm, kubectl
+- Lock package versions
 
-### Stage 4: Kube-VIP 設定 (04-kube-vip-setup.yml)
-- 設定 kube-vip manifest
-- 準備高可用性 API Server
+### Stage 4: Kube-VIP Setup (04-kube-vip-setup.yml)
+- Configure kube-vip manifest
+- Prepare high-availability API Server
 
-### Stage 5: 叢集初始化 (05-cluster-init.yml)
-- 使用 kubeadm 初始化第一個 master
-- 產生 join token
-- 設定 kubeconfig
+### Stage 5: Cluster Initialization (05-cluster-init.yml)
+- Initialize first master using kubeadm
+- Generate join token
+- Configure kubeconfig
 
-### Stage 6: 網路設定 (06-network-setup.yml)
-- 部署 Calico CNI
-- 等待網路組件就緒
+### Stage 6: Network Setup (06-network-setup.yml)
+- Deploy Calico CNI
+- Wait for network components to be ready
 
-### Stage 7: 加入 Master 節點 (07-join-masters.yml)
-- 其他 master 節點加入叢集
-- 設定各節點的 kubeconfig
+### Stage 7: Join Master Nodes (07-join-masters.yml)
+- Other master nodes join the cluster
+- Configure kubeconfig for each node
 
-### Stage 8: 加入 Worker 節點 (08-join-workers.yml)
-- Worker 節點加入叢集
-- 驗證節點狀態
+### Stage 8: Join Worker Nodes (08-join-workers.yml)
+- Worker nodes join the cluster
+- Verify node status
 
-### Stage 9: 完成設定 (09-finalize-cluster.yml)
-- 為 worker 節點加上標籤
-- 檢查叢集狀態
-- 產生叢集資訊
+### Stage 9: Finalize Setup (09-finalize-cluster.yml)
+- Add labels to worker nodes
+- Check cluster status
+- Generate cluster information
 
-## 使用方式
+## Usage
 
-### 完整部署
+### Full Deployment
 ```bash
 ./deploy.sh
-# 或
+# or
 ./deploy.sh --full
 ```
 
-### 執行特定階段
+### Execute Specific Stage
 ```bash
-./deploy.sh --stage 1    # 執行第 1 階段
-./deploy.sh --stage 5    # 執行第 5 階段
+./deploy.sh --stage 1    # Execute stage 1
+./deploy.sh --stage 5    # Execute stage 5
 ```
 
-### 使用 site.yml 一次執行所有階段
+### Use site.yml to Execute All Stages
 ```bash
 ./deploy.sh --site
 ```
 
-### 列出所有階段
+### List All Stages
 ```bash
 ./deploy.sh --list
 ```
 
-### 顯示說明
+### Show Help
 ```bash
 ./deploy.sh --help
 ```
 
-## 檔案結構
+## File Structure
 
 ```
-├── inventory.ini              # Ansible 主機清單
-├── site.yml                   # 主要編排 playbook
-├── deploy.sh                  # 部署腳本
+├── inventory.ini              # Main Ansible host inventory (only file you need to edit)
+├── site.yml                   # Main orchestration playbook
+├── deploy.sh                  # Deployment script
+├── setup-ssh/
+│   └── setup_ssh.sh           # SSH setup script (reads from main inventory.ini)
 ├── templates/
-│   └── init-config.yaml.j2    # kubeadm 設定範本
+│   └── init-config.yaml.j2    # kubeadm configuration template
 └── playbooks/
     ├── 01-system-setup.yml
     ├── 02-container-runtime.yml
@@ -109,50 +154,50 @@
     └── 09-finalize-cluster.yml
 ```
 
-## 前置需求
+## Prerequisites
 
-1. **Ansible 安裝**
+1. **Ansible Installation**
    - macOS: `brew install ansible`
    - Linux: `sudo apt install ansible`
 
-2. **SSH 連線**
-   - 確保能以 root 身份 SSH 連線到所有節點
-   - 或設定 sudo 免密碼
+2. **SSH Connection**
+   - Ensure root SSH access to all nodes
+   - Or configure passwordless sudo
 
-3. **系統需求**
+3. **System Requirements**
    - Ubuntu 20.04/22.04
-   - 最少 2GB RAM
-   - 最少 2 CPU cores
+   - Minimum 2GB RAM
+   - Minimum 2 CPU cores
 
-## 部署後操作
+## Post-Deployment Operations
 
-1. **取得 kubeconfig**
+1. **Get kubeconfig**
    ```bash
    scp root@10.10.7.230:/etc/kubernetes/admin.conf ~/.kube/config
    ```
 
-2. **驗證叢集**
+2. **Verify Cluster**
    ```bash
    kubectl get nodes
    kubectl get pods -A
    ```
 
-3. **安裝額外組件**
+3. **Install Additional Components**
    - Ingress Controller
    - Storage Classes
    - Monitoring (Prometheus/Grafana)
    - Logging (ELK Stack)
 
-## 故障排除
+## Troubleshooting
 
-- 檢查特定階段的日誌
-- 重新執行失敗的階段
-- 驗證網路連線與 SSH 權限
-- 確認系統資源充足
+- Check specific stage logs
+- Re-execute failed stages
+- Verify network connectivity and SSH permissions
+- Ensure sufficient system resources
 
-## 版本資訊
+## Version Information
 
 - Kubernetes: 1.32.4
 - Containerd: 1.7.27
 - Calico: 3.29.4
-- kube-vip: 最新版本
+- kube-vip: Latest version

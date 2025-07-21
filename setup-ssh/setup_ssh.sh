@@ -33,8 +33,8 @@ if ! command -v sshpass &> /dev/null; then
     fi
 fi
 
-# Configuration file
-INVENTORY_FILE="inventory.ini"
+# Configuration file - use main inventory.ini from parent directory
+INVENTORY_FILE="../inventory.ini"
 
 # Variables to be loaded from inventory.ini
 USERNAME=""
@@ -53,8 +53,9 @@ echo -e "${GREEN}=== Ultra Simple SSH Setup ===${NC}"
 # Load configuration from inventory.ini
 load_config() {
     local inventory_file="$1"
-    local in_config_section=false
-    local in_nodes_section=false
+    local in_masters_section=false
+    local in_workers_section=false
+    local in_all_vars_section=false
     
     if [[ ! -f "$inventory_file" ]]; then
         echo -e "${RED}Error: Inventory file '$inventory_file' not found!${NC}"
@@ -68,59 +69,71 @@ load_config() {
         [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
         
         if [[ "$line" =~ ^\[.*\]$ ]]; then
-            if [[ "$line" == "[config]" ]]; then
-                in_config_section=true
-                in_nodes_section=false
-            elif [[ "$line" == "[master]" || "$line" == "[worker]" || "$line" == "[nodes]" ]]; then
-                in_config_section=false
-                in_nodes_section=true
-            elif [[ "$line" == "[nodes:children]" ]]; then
-                in_nodes_section=false
+            if [[ "$line" == "[masters]" ]]; then
+                in_masters_section=true
+                in_workers_section=false
+                in_all_vars_section=false
+            elif [[ "$line" == "[workers]" ]]; then
+                in_masters_section=false
+                in_workers_section=true
+                in_all_vars_section=false
+            elif [[ "$line" == "[all:vars]" ]]; then
+                in_masters_section=false
+                in_workers_section=false
+                in_all_vars_section=true
             else
-                in_config_section=false
-                in_nodes_section=false
+                in_masters_section=false
+                in_workers_section=false
+                in_all_vars_section=false
             fi
             continue
         fi
         
-        # Parse config variables
-        if [[ "$in_config_section" == true && "$line" =~ ^[a-zA-Z_][a-zA-Z0-9_]*= ]]; then
+        # Parse variables from [all:vars] section
+        if [[ "$in_all_vars_section" == true && "$line" =~ ^[a-zA-Z_][a-zA-Z0-9_]*= ]]; then
             key=$(echo "$line" | cut -d'=' -f1)
             value=$(echo "$line" | cut -d'=' -f2- | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
             
             case "$key" in
-                "username") USERNAME="$value" ;;
-                "password") USER_PASSWORD="$value" ;;
-                "root_password") ROOT_PASSWORD="$value" ;;
-                "ssh_key_path") SSH_KEY_PATH="${value/#\~/$HOME}" ;;
+                "ansible_user") USERNAME="$value" ;;
+                "ansible_become_pass") USER_PASSWORD="$value" ;;
+                "ansible_ssh_private_key_file") SSH_KEY_PATH="${value/#\~/$HOME}" ;;
             esac
         fi
         
-        # Parse node IPs and hostnames
-        if [[ "$in_nodes_section" == true && "$line" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            ip=$(echo "$line" | awk '{print $1}')
-            
-            # Extract hostname from hostname parameter or comment
-            hostname=""
-            if [[ "$line" =~ hostname=([a-zA-Z0-9-]+) ]]; then
-                hostname="${BASH_REMATCH[1]}"
-            elif [[ "$line" =~ \#[[:space:]]*([a-zA-Z0-9-]+) ]]; then
-                hostname="${BASH_REMATCH[1]}"
+        # Parse master nodes
+        if [[ "$in_masters_section" == true && "$line" =~ ^[a-zA-Z0-9-]+ ]]; then
+            hostname=$(echo "$line" | awk '{print $1}')
+            if [[ "$line" =~ ansible_host=([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) ]]; then
+                ip="${BASH_REMATCH[1]}"
+                NODES+=("$ip:$hostname")
             fi
-            
-            NODES+=("$ip:$hostname")
+        fi
+        
+        # Parse worker nodes
+        if [[ "$in_workers_section" == true && "$line" =~ ^[a-zA-Z0-9-]+ ]]; then
+            hostname=$(echo "$line" | awk '{print $1}')
+            if [[ "$line" =~ ansible_host=([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) ]]; then
+                ip="${BASH_REMATCH[1]}"
+                NODES+=("$ip:$hostname")
+            fi
         fi
     done < "$inventory_file"
     
+    # Set ROOT_PASSWORD same as USER_PASSWORD for simplicity
+    ROOT_PASSWORD="$USER_PASSWORD"
+    
     # Validate required variables
-    if [[ -z "$USERNAME" || -z "$USER_PASSWORD" || -z "$ROOT_PASSWORD" || -z "$SSH_KEY_PATH" ]]; then
+    if [[ -z "$USERNAME" || -z "$USER_PASSWORD" || -z "$SSH_KEY_PATH" ]]; then
         echo -e "${RED}Error: Missing required configuration!${NC}"
-        echo "Required: username, password, root_password, ssh_key_path"
+        echo "Required: ansible_user, ansible_become_pass, ansible_ssh_private_key_file"
+        echo "Make sure these are set in [all:vars] section"
         exit 1
     fi
     
     if [[ ${#NODES[@]} -eq 0 ]]; then
         echo -e "${RED}Error: No nodes found in inventory!${NC}"
+        echo "Make sure you have [masters] and [workers] sections with ansible_host specified"
         exit 1
     fi
     
