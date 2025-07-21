@@ -34,7 +34,7 @@ if ! command -v sshpass &> /dev/null; then
 fi
 
 # Configuration file - use main inventory.ini from parent directory
-INVENTORY_FILE="../inventory.ini"
+INVENTORY_FILE="./inventory.ini"
 
 # Variables to be loaded from inventory.ini
 USERNAME=""
