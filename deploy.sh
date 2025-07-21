@@ -32,9 +32,9 @@ run_stage() {
     echo "==========================================="
     
     if ansible-playbook -i inventory.ini "${playbook}"; then
-        echo "✅ Stage ${stage_num} completed successfully"
+        echo "Stage ${stage_num} completed successfully"
     else
-        echo "❌ Stage ${stage_num} failed"
+        echo "Stage ${stage_num} failed"
         exit 1
     fi
 }

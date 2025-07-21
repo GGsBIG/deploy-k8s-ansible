@@ -4,7 +4,6 @@ Automated deployment of high-availability Kubernetes cluster using Ansible scrip
 
 ## Deployment Steps
 
-<<<<<<< HEAD
 ### 1. Configure Inventory
 ```bash
 # Edit the main inventory file with your VM information
@@ -12,79 +11,42 @@ vim /deploy-k8s-ansible/inventory.ini
 
 # Example configuration:
 # [masters]
-# master-01 ansible_host=172.21.169.51 hostname=master-01
-# master-02 ansible_host=172.21.169.52 hostname=master-02
-# master-03 ansible_host=172.21.169.53 hostname=master-03
+# master-01 ansible_host=10.10.7.236 hostname=master-01
+# master-02 ansible_host=10.10.7.237 hostname=master-02
+# master-03 ansible_host=10.10.7.238 hostname=master-03
 #
 # [workers]
-# worker-01 ansible_host=172.21.169.61 hostname=worker-01
-# worker-02 ansible_host=172.21.169.62 hostname=worker-02
+# worker-01 ansible_host=10.10.7.239 hostname=worker-01
+# worker-02 ansible_host=10.10.7.240 hostname=worker-02
 #
 # [all:vars]
-# ansible_user=systex
-# ansible_become_pass=Systex123!
+# ansible_user=bbg
+# ansible_become_pass=1qaz@WSX
 # ansible_ssh_private_key_file=~/.ssh/id_rsa
 ```
 
 ### 2. Execute SSH Setup Script
-=======
-### 1. Configure SSH Connection
-```bash
-# Edit SSH configuration inventory
-vim /deploy-k8s-ansible/setup-ssh/inventory.ini
-
-# Modify VM IPs and connection information for deployment
-```
-
-### 2. Configure Main Inventory
-```bash
-# Edit main deployment inventory
-vim /deploy-k8s-ansible/inventory.ini
-
-# Modify VM IPs and group configuration for deployment
-```
-
-### 3. Execute SSH Setup Script
->>>>>>> 6607db13c065b47be332f27cb13b35fc6cca4a50
 ```bash
 # Grant execution permission
 chmod +x /deploy-k8s-ansible/setup-ssh/setup_ssh.sh
-
-# Execute on the virtual machine where the script will run
-<<<<<<< HEAD
-cd /deploy-k8s-ansible/setup-ssh
-./setup_ssh.sh
 ```
 
 ### 3. Start Kubernetes Cluster Deployment
-=======
-./setup-ssh.sh
-```
-
-### 4. Start Kubernetes Cluster Deployment
->>>>>>> 6607db13c065b47be332f27cb13b35fc6cca4a50
 ```bash
 # Grant execution permission to deployment script
 chmod +x /deploy-k8s-ansible/deploy.sh
-
-# Start cluster deployment
-<<<<<<< HEAD
-cd /deploy-k8s-ansible
-=======
->>>>>>> 6607db13c065b47be332f27cb13b35fc6cca4a50
-./deploy.sh
 ```
 
 ## Cluster Architecture
 
-- **VIP**: 10.10.7.236 (kube-vip)
+- **VIP**: 10.10.7.235 (kube-vip)
 - **Master Nodes**: 
-  - master-01: 10.10.7.230
-  - master-02: 10.10.7.231  
-  - master-03: 10.10.7.232
+  - master-01: 10.10.7.236
+  - master-02: 10.10.7.237  
+  - master-03: 10.10.7.238
 - **Worker Nodes**:
-  - worker-01: 10.10.7.233
-  - worker-02: 10.10.7.234
+  - worker-01: 10.10.7.239
+  - worker-02: 10.10.7.240
 
 ## Deployment Stages
 
@@ -165,20 +127,11 @@ cd /deploy-k8s-ansible
 ## File Structure
 
 ```
-<<<<<<< HEAD
 ├── inventory.ini              # Main Ansible host inventory (only file you need to edit)
 ├── site.yml                   # Main orchestration playbook
 ├── deploy.sh                  # Deployment script
 ├── setup-ssh/
 │   └── setup_ssh.sh           # SSH setup script (reads from main inventory.ini)
-=======
-├── inventory.ini              # Ansible host inventory
-├── site.yml                   # Main orchestration playbook
-├── deploy.sh                  # Deployment script
-├── setup-ssh/
-│   ├── inventory.ini          # SSH configuration inventory
-│   └── setup_ssh.sh           # SSH setup script
->>>>>>> 6607db13c065b47be332f27cb13b35fc6cca4a50
 ├── templates/
 │   └── init-config.yaml.j2    # kubeadm configuration template
 └── playbooks/
@@ -212,7 +165,7 @@ cd /deploy-k8s-ansible
 
 1. **Get kubeconfig**
    ```bash
-   scp root@10.10.7.230:/etc/kubernetes/admin.conf ~/.kube/config
+   scp root@10.10.7.236:/etc/kubernetes/admin.conf ~/.kube/config
    ```
 
 2. **Verify Cluster**
@@ -236,11 +189,7 @@ cd /deploy-k8s-ansible
 
 ## Version Information
 
-- Kubernetes: 1.32.4
+- Kubernetes: 1.31
 - Containerd: 1.7.27
-- Calico: 3.29.4
-<<<<<<< HEAD
+- Calico: v3.30.2
 - kube-vip: Latest version
-=======
-- kube-vip: Latest version
->>>>>>> 6607db13c065b47be332f27cb13b35fc6cca4a50
