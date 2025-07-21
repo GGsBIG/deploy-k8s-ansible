@@ -2,6 +2,42 @@
 
 自動化部署 Kubernetes 高可用叢集的 Ansible 腳本
 
+## 部署步驟
+
+### 1. 設定 SSH 連線
+```bash
+# 編輯 SSH 設定清單
+vim /deploy-k8s-ansible/setup-ssh/inventory.ini
+
+# 修改需要佈署的 VM IP 和連線資訊
+```
+
+### 2. 設定主要清單
+```bash
+# 編輯主要部署清單
+vim /deploy-k8s-ansible/inventory.ini
+
+# 修改需要佈署的 VM IP 和群組設定
+```
+
+### 3. 執行 SSH 設定腳本
+```bash
+# 給予執行權限
+chmod +x /deploy-k8s-ansible/setup-ssh/setup_ssh.sh
+
+# 在要執行腳本的虛擬機上執行
+./setup-ssh.sh
+```
+
+### 4. 開始佈署 Kubernetes 叢集
+```bash
+# 給予部署腳本執行權限
+chmod +x /deploy-k8s-ansible/deploy.sh
+
+# 開始佈署叢集
+./deploy.sh
+```
+
 ## 叢集架構
 
 - **VIP**: 10.10.7.236 (kube-vip)
@@ -95,6 +131,9 @@
 ├── inventory.ini              # Ansible 主機清單
 ├── site.yml                   # 主要編排 playbook
 ├── deploy.sh                  # 部署腳本
+├── setup-ssh/
+│   ├── inventory.ini          # SSH 設定清單
+│   └── setup_ssh.sh           # SSH 設定腳本
 ├── templates/
 │   └── init-config.yaml.j2    # kubeadm 設定範本
 └── playbooks/
