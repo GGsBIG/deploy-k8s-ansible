@@ -5,6 +5,14 @@
   gather_facts: yes
   
   tasks:
+    - name: Wait for dpkg lock to be released
+      shell: |
+        while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+          echo "Waiting for dpkg lock to be released..."
+          sleep 10
+        done
+      ignore_errors: yes
+
     - name: Install required packages
       apt:
         name:
