@@ -129,7 +129,7 @@ sudo rm -rf /etc/kube-flannel/ 2>/dev/null || true
 
 # Step 5: Clear Kubernetes iptables and ipvs rules (保護 SSH 連線)
 echo "Step 5: Clearing Kubernetes iptables and ipvs rules..."
-echo "WARNING: Backing up current iptables rules before cleanup...
+echo "WARNING: Backing up current iptables rules before cleanup..."
 
 # 備份當前 iptables 規則
 sudo iptables-save > /tmp/iptables-backup-$(date +%Y%m%d-%H%M%S).rules 2>/dev/null || true
