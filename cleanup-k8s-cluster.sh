@@ -52,6 +52,15 @@ ip link show | grep -E 'cali|flannel|tunl|vxlan|docker0|cni|kube' | awk -F: '{pr
     fi
 done
 
+# 額外檢查並強制移除 tunl0 介面
+if ip link show tunl0 >/dev/null 2>&1; then
+    echo "Force removing tunl0 interface..."
+    sudo ip link set tunl0 down 2>/dev/null || true
+    sudo ip link delete tunl0 2>/dev/null || true
+    # 移除 ipip 內核模組確保 tunl0 不會重新出現
+    sudo modprobe -r ipip 2>/dev/null || true
+fi
+
 # 只清除 Kubernetes 相關的 bridge，保留系統預設 bridge
 ip link show type bridge | awk -F: '{print $2}' | grep -E 'docker0|cni|kube|cali' | while read bridge; do
     bridge=$(echo "$bridge" | tr -d ' ')
@@ -102,6 +111,10 @@ sudo modprobe -r nf_conntrack 2>/dev/null || true
 sudo modprobe -r veth 2>/dev/null || true
 sudo modprobe -r bridge 2>/dev/null || true
 sudo modprobe -r xt_nat 2>/dev/null || true
+
+# 移除 ipip 模組以徹底清除 tunl0 介面
+echo "Removing ipip kernel module to eliminate tunl0 interface..."
+sudo modprobe -r ipip 2>/dev/null || true
 
 # Step 4: Remove all related directories and configurations
 echo "Step 4: Removing directories and configurations..."
@@ -179,15 +192,25 @@ echo "iptables cleanup completed. SSH connectivity should be preserved."
 
 # Step 6: Uninstall all related packages
 echo "Step 6: Uninstalling packages..."
+# First unhold packages to allow removal
+echo "Unholding Kubernetes packages..."
+sudo apt-mark unhold kubeadm kubectl kubelet kubernetes-cni 2>/dev/null || true
+
 # Remove Kubernetes packages
 sudo apt-get remove -y kubeadm kubectl kubelet kubernetes-cni 2>/dev/null || true
 sudo apt-get purge -y kubeadm kubectl kubelet kubernetes-cni 2>/dev/null || true
 
 # Remove container runtime packages
+echo "Unholding container runtime packages..."
+sudo apt-mark unhold containerd.io docker-ce docker-ce-cli docker-compose-plugin 2>/dev/null || true
+sudo apt-mark unhold containerd containerd.io 2>/dev/null || true
+
 sudo apt-get remove -y containerd.io docker-ce docker-ce-cli docker-compose-plugin 2>/dev/null || true
+sudo apt-get remove -y containerd 2>/dev/null || true
 sudo apt-get remove -y podman buildah skopeo 2>/dev/null || true
 sudo apt-get remove -y runc containernetworking-plugins 2>/dev/null || true
 sudo apt-get purge -y containerd.io docker-ce docker-ce-cli docker-compose-plugin 2>/dev/null || true
+sudo apt-get purge -y containerd 2>/dev/null || true
 sudo apt-get purge -y podman buildah skopeo 2>/dev/null || true
 sudo apt-get purge -y runc containernetworking-plugins 2>/dev/null || true
 
@@ -288,14 +311,15 @@ echo "=== Checking iptables rules ==="
 sudo iptables -L -n -v | grep -E 'kube|docker|cali' || echo "No Kubernetes iptables rules found"
 
 echo "=== Checking loaded modules ==="
-lsmod | grep -E 'br_netfilter|overlay|ip_vs' || echo "No Kubernetes modules loaded"
+lsmod | grep -E 'br_netfilter|overlay|ip_vs|ipip' || echo "No Kubernetes modules loaded"
 
 echo ""
 echo "=== Cleanup completed! ==="
-echo "It's recommended to reboot the system to ensure complete cleanup:"
-echo "sudo reboot"
+echo "All Kubernetes components have been successfully removed."
 echo ""
-echo "After reboot, you can verify the cleanup by running:"
+echo "You can verify the cleanup by running:"
 echo "docker version 2>/dev/null || echo 'Docker removed successfully'"
 echo "kubectl version 2>/dev/null || echo 'kubectl removed successfully'"
 echo "systemctl status kubelet 2>/dev/null || echo 'kubelet service removed'"
+echo ""
+echo "System is ready for fresh Kubernetes installation if needed."
