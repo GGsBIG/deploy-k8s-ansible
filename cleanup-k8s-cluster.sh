@@ -293,8 +293,46 @@ else
     echo "Try: sudo systemctl restart networking"
 fi
 
-# Step 10: Verification
-echo "Step 10: Verifying cleanup..."
+# Step 10: Set hostname according to inventory.ini
+echo "Step 10: Setting hostname according to inventory.ini..."
+
+# 獲取當前主機的 IP 位址
+CURRENT_IP=$(ip route get 8.8.8.8 2>/dev/null | head -1 | awk '{print $7}' || echo "")
+INVENTORY_FILE="inventory.ini"
+
+if [ -f "$INVENTORY_FILE" ]; then
+    echo "Found inventory.ini file, looking up hostname for IP: $CURRENT_IP"
+    
+    # 從 inventory.ini 查找對應的 hostname
+    NEW_HOSTNAME=$(grep "ansible_host=$CURRENT_IP" "$INVENTORY_FILE" | awk '{print $1}' | head -1)
+    
+    if [ -n "$NEW_HOSTNAME" ]; then
+        echo "Setting hostname to: $NEW_HOSTNAME"
+        
+        # 設定新的 hostname
+        sudo hostnamectl set-hostname "$NEW_HOSTNAME"
+        
+        # 更新 /etc/hosts
+        sudo sed -i "/127.0.1.1/d" /etc/hosts
+        echo "127.0.1.1    $NEW_HOSTNAME" | sudo tee -a /etc/hosts
+        
+        # 驗證設定
+        echo "New hostname: $(hostnamectl --static)"
+        echo "Updated /etc/hosts:"
+        grep "$NEW_HOSTNAME" /etc/hosts || echo "Warning: hostname not found in /etc/hosts"
+        
+    else
+        echo "Warning: Could not find hostname for IP $CURRENT_IP in inventory.ini"
+        echo "Available hosts in inventory:"
+        grep "ansible_host=" "$INVENTORY_FILE" | awk '{print $1, $2}' || true
+    fi
+else
+    echo "Warning: inventory.ini file not found in current directory"
+    echo "Skipping hostname configuration"
+fi
+
+# Step 11: Verification
+echo "Step 11: Verifying cleanup..."
 echo "=== Checking for remaining Kubernetes processes ==="
 ps aux | grep -E 'kube|docker|containerd' | grep -v grep || echo "No Kubernetes processes found"
 
