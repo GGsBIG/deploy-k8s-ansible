@@ -23,35 +23,71 @@ sudo systemctl disable docker 2>/dev/null || true
 sudo systemctl stop containerd 2>/dev/null || true
 sudo systemctl disable containerd 2>/dev/null || true
 
-# Step 2: Clean up all virtual network interfaces
-echo "Step 2: Cleaning up virtual network interfaces..."
-ip link show | grep -E 'cali|flannel|tunl|vxlan|docker|cni|kube' | awk -F: '{print $2}' | while read iface; do
+# Step 2: Clean up Kubernetes virtual network interfaces (保護主要網路連線)
+echo "Step 2: Cleaning up Kubernetes virtual network interfaces..."
+echo "Detecting current network configuration to preserve SSH connectivity..."
+
+# 獲取當前 SSH 連線的網路介面和 IP
+SSH_CLIENT_IP=$(echo $SSH_CLIENT | awk '{print $1}' 2>/dev/null || echo "")
+SSH_CONNECTION_IP=$(echo $SSH_CONNECTION | awk '{print $3}' 2>/dev/null || echo "")
+MAIN_INTERFACE=$(ip route get 8.8.8.8 2>/dev/null | head -1 | awk '{print $5}' || echo "")
+MAIN_IP=$(ip route get 8.8.8.8 2>/dev/null | head -1 | awk '{print $7}' || echo "")
+
+echo "Protected network info:"
+echo "- Main interface: $MAIN_INTERFACE"
+echo "- Main IP: $MAIN_IP"
+echo "- SSH client IP: $SSH_CLIENT_IP"
+echo "- SSH connection IP: $SSH_CONNECTION_IP"
+
+# 只清除 Kubernetes 相關的虛擬網路介面，避免清除主要網路
+ip link show | grep -E 'cali|flannel|tunl|vxlan|docker0|cni|kube' | awk -F: '{print $2}' | while read iface; do
     iface=$(echo "$iface" | tr -d ' ')
-    if [ -n "$iface" ]; then
+    # 確保不清除主要網路介面
+    if [ -n "$iface" ] && [ "$iface" != "$MAIN_INTERFACE" ] && [[ ! "$iface" =~ ^(eth|ens|enp|wlan|wlp)[0-9] ]]; then
+        echo "Removing interface: $iface"
         sudo ip link set "$iface" down 2>/dev/null || true
         sudo ip link delete "$iface" 2>/dev/null || true
+    else
+        echo "Preserving interface: $iface"
     fi
 done
 
-# Clean up bridge interfaces
-ip link show type bridge | awk -F: '{print $2}' | grep -E 'docker|cni|kube|cali' | while read bridge; do
+# 只清除 Kubernetes 相關的 bridge，保留系統預設 bridge
+ip link show type bridge | awk -F: '{print $2}' | grep -E 'docker0|cni|kube|cali' | while read bridge; do
     bridge=$(echo "$bridge" | tr -d ' ')
-    if [ -n "$bridge" ]; then
+    if [ -n "$bridge" ] && [ "$bridge" != "br0" ] && [ "$bridge" != "virbr0" ]; then
+        echo "Removing bridge: $bridge"
         sudo ip link set "$bridge" down 2>/dev/null || true
         sudo ip link delete "$bridge" 2>/dev/null || true
+    else
+        echo "Preserving bridge: $bridge"
     fi
 done
 
-# Remove all veth pairs
+# 只清除 veth 對，但要小心不要影響主要連線
+echo "Cleaning up veth pairs (Kubernetes related only)..."
 ip link show type veth | awk -F: '{print $2}' | while read veth; do
     veth=$(echo "$veth" | tr -d ' ')
     if [ -n "$veth" ]; then
-        sudo ip link delete "$veth" 2>/dev/null || true
+        # 檢查這個 veth 是否與重要網路相關
+        veth_info=$(ip addr show "$veth" 2>/dev/null || echo "")
+        if [[ "$veth_info" != *"$SSH_CLIENT_IP"* ]] && [[ "$veth_info" != *"$SSH_CONNECTION_IP"* ]] && [[ "$veth_info" != *"$MAIN_IP"* ]]; then
+            echo "Removing veth: $veth"
+            sudo ip link delete "$veth" 2>/dev/null || true
+        else
+            echo "Preserving veth: $veth (connected to important network)"
+        fi
     fi
 done
 
-# Clear routing tables
-sudo ip route flush table main 2>/dev/null || true
+# 不要清除主路由表，而是只清除 Kubernetes 相關路由
+echo "Removing Kubernetes specific routes only..."
+# 清除 Kubernetes 服務 IP 範圍的路由 (通常是 10.96.0.0/12)
+sudo ip route del 10.96.0.0/12 2>/dev/null || true
+# 清除 Pod IP 範圍的路由 (通常是 10.244.0.0/16 for flannel, 192.168.0.0/16 for calico)
+sudo ip route del 10.244.0.0/16 2>/dev/null || true
+sudo ip route del 192.168.0.0/16 2>/dev/null || true
+# 清除路由快取但保留主路由表
 sudo ip route flush cache 2>/dev/null || true
 
 # Step 3: Unload kernel modules
@@ -91,24 +127,55 @@ sudo rm -rf /etc/systemd/network/10-calico.network 2>/dev/null || true
 sudo rm -rf /run/flannel/ 2>/dev/null || true
 sudo rm -rf /etc/kube-flannel/ 2>/dev/null || true
 
-# Step 5: Clear iptables and ipvs rules
-echo "Step 5: Clearing iptables and ipvs rules..."
-sudo iptables -t filter -F 2>/dev/null || true
-sudo iptables -t filter -X 2>/dev/null || true
-sudo iptables -t nat -F 2>/dev/null || true
-sudo iptables -t nat -X 2>/dev/null || true
-sudo iptables -t mangle -F 2>/dev/null || true
-sudo iptables -t mangle -X 2>/dev/null || true
-sudo iptables -t raw -F 2>/dev/null || true
-sudo iptables -t raw -X 2>/dev/null || true
+# Step 5: Clear Kubernetes iptables and ipvs rules (保護 SSH 連線)
+echo "Step 5: Clearing Kubernetes iptables and ipvs rules..."
+echo "WARNING: Backing up current iptables rules before cleanup...
 
-# Reset iptables default policies
+# 備份當前 iptables 規則
+sudo iptables-save > /tmp/iptables-backup-$(date +%Y%m%d-%H%M%S).rules 2>/dev/null || true
+
+echo "Removing only Kubernetes-specific iptables rules..."
+# 只移除 Kubernetes 相關的鏈，而不是清空所有規則
+sudo iptables -t nat -D POSTROUTING -s 10.244.0.0/16 ! -d 10.244.0.0/16 -j MASQUERADE 2>/dev/null || true
+sudo iptables -t nat -D POSTROUTING -s 10.96.0.0/12 ! -d 10.96.0.0/12 -j MASQUERADE 2>/dev/null || true
+sudo iptables -t filter -D FORWARD -s 10.244.0.0/16 -j ACCEPT 2>/dev/null || true
+sudo iptables -t filter -D FORWARD -d 10.244.0.0/16 -j ACCEPT 2>/dev/null || true
+
+# 移除 Kubernetes 相關的自定義鏈
+for chain in KUBE-SERVICES KUBE-EXTERNAL-SERVICES KUBE-NODEPORTS KUBE-POSTROUTING KUBE-MARK-MASQ KUBE-MARK-DROP; do
+    sudo iptables -t nat -F $chain 2>/dev/null || true
+    sudo iptables -t nat -X $chain 2>/dev/null || true
+done
+
+for chain in KUBE-FORWARD KUBE-SERVICES KUBE-EXTERNAL-SERVICES KUBE-NODEPORTS; do
+    sudo iptables -t filter -F $chain 2>/dev/null || true
+    sudo iptables -t filter -X $chain 2>/dev/null || true
+done
+
+# 清除 Docker 相關規則但保留基本連線
+sudo iptables -t nat -D PREROUTING -m addrtype --dst-type LOCAL -j DOCKER 2>/dev/null || true
+sudo iptables -t nat -D OUTPUT ! -d 127.0.0.0/8 -m addrtype --dst-type LOCAL -j DOCKER 2>/dev/null || true
+sudo iptables -t nat -F DOCKER 2>/dev/null || true
+sudo iptables -t nat -X DOCKER 2>/dev/null || true
+sudo iptables -t filter -F DOCKER 2>/dev/null || true
+sudo iptables -t filter -X DOCKER 2>/dev/null || true
+sudo iptables -t filter -F DOCKER-ISOLATION-STAGE-1 2>/dev/null || true
+sudo iptables -t filter -X DOCKER-ISOLATION-STAGE-1 2>/dev/null || true
+sudo iptables -t filter -F DOCKER-ISOLATION-STAGE-2 2>/dev/null || true
+sudo iptables -t filter -X DOCKER-ISOLATION-STAGE-2 2>/dev/null || true
+sudo iptables -t filter -F DOCKER-USER 2>/dev/null || true
+sudo iptables -t filter -X DOCKER-USER 2>/dev/null || true
+
+# 確保基本政策允許連線（特別重要避免 SSH 斷線）
 sudo iptables -P INPUT ACCEPT 2>/dev/null || true
 sudo iptables -P FORWARD ACCEPT 2>/dev/null || true
 sudo iptables -P OUTPUT ACCEPT 2>/dev/null || true
 
-# Clear ipvs rules
+# 清除 ipvs 規則
+echo "Clearing ipvs rules..."
 sudo ipvsadm -C 2>/dev/null || true
+
+echo "iptables cleanup completed. SSH connectivity should be preserved."
 
 # Step 6: Uninstall all related packages
 echo "Step 6: Uninstalling packages..."
@@ -164,11 +231,44 @@ sudo rm -rf /tmp/k8s-*
 sudo rm -rf /tmp/calico-*
 sudo rm -rf /tmp/containerd-*
 
-# Step 9: Reset network and restart services
-echo "Step 9: Resetting network..."
+# Step 9: Reset network settings carefully (保護 SSH 連線)
+echo "Step 9: Resetting network settings (preserving SSH connectivity)..."
+echo "WARNING: Network services restart may temporarily affect connectivity"
+echo "Current SSH connection info preserved"
+
+# 重新載入 sysctl 但不強制重啟網路服務
 sudo sysctl --system 2>/dev/null || true
-sudo systemctl restart systemd-networkd 2>/dev/null || true
-sudo systemctl restart networking 2>/dev/null || true
+
+# 檢查網路連線狀態再決定是否重啟服務
+if ping -c 1 8.8.8.8 >/dev/null 2>&1; then
+    echo "Network connectivity OK, proceeding with careful service restart..."
+    # 只重啟 networkd 如果它正在運行
+    if systemctl is-active systemd-networkd >/dev/null 2>&1; then
+        echo "Restarting systemd-networkd..."
+        sudo systemctl restart systemd-networkd 2>/dev/null || true
+        sleep 2
+    fi
+    
+    # 檢查連線狀態，如果 OK 才重啟 networking
+    if ping -c 1 8.8.8.8 >/dev/null 2>&1; then
+        echo "Network still OK, restarting networking service..."
+        sudo systemctl restart networking 2>/dev/null || true
+        sleep 2
+    else
+        echo "Network connectivity lost after systemd-networkd restart, skipping networking restart"
+    fi
+else
+    echo "Network connectivity already impaired, skipping network service restart"
+    echo "Manual network configuration may be required"
+fi
+
+echo "Network reset completed. Checking connectivity..."
+if ping -c 1 8.8.8.8 >/dev/null 2>&1; then
+    echo "✓ Network connectivity verified"
+else
+    echo "⚠ Network connectivity issue detected. Manual intervention may be required."
+    echo "Try: sudo systemctl restart networking"
+fi
 
 # Step 10: Verification
 echo "Step 10: Verifying cleanup..."
