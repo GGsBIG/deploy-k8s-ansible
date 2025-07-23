@@ -5,6 +5,14 @@
   gather_facts: yes
   
   tasks:
+    - name: Add all nodes to /etc/hosts for hostname resolution
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ hostvars[item]['ansible_default_ipv4']['address'] }} {{ item }}"
+        state: present
+      loop: "{{ groups['all'] }}"
+      when: hostvars[item]['ansible_default_ipv4']['address'] is defined
+
     - name: Create kubeadm init configuration file
       template:
         src: ../templates/init-config.yaml.j2

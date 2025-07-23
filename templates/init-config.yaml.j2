@@ -1,4 +1,4 @@
-apiVersion: kubeadm.k8s.io/v1beta3
+apiVersion: kubeadm.k8s.io/v1beta4
 kind: InitConfiguration
 localAPIEndpoint:
   advertiseAddress: {{ ansible_default_ipv4.address }}
@@ -9,7 +9,7 @@ nodeRegistration:
   name: {{ inventory_hostname }}
   taints: null
 ---
-apiVersion: kubeadm.k8s.io/v1beta3
+apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
 kubernetesVersion: {{ k8s_version }}.4
 controlPlaneEndpoint: {{ control_plane_endpoint }}

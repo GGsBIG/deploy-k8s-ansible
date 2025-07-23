@@ -44,6 +44,7 @@
         url: "https://raw.githubusercontent.com/containerd/containerd/main/containerd.service"
         dest: "/tmp/containerd.service"
         mode: '0644'
+        validate_certs: false
 
     - name: Extract containerd binary
       unarchive:
@@ -125,6 +126,12 @@
         path: /etc/containerd/config.toml
         regexp: 'SystemdCgroup = false'
         replace: 'SystemdCgroup = true'
+
+    - name: Update sandbox image to pause:3.10
+      replace:
+        path: /etc/containerd/config.toml
+        regexp: 'sandbox_image = "registry.k8s.io/pause:3.8"'
+        replace: 'sandbox_image = "registry.k8s.io/pause:3.10"'
 
     - name: Restart containerd
       systemd:
