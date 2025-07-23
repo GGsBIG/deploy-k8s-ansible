@@ -19,12 +19,16 @@ certificatesDir: /etc/kubernetes/pki
 clusterName: kubernetes
 controllerManager:
   extraArgs:
-    bind-address: "0.0.0.0"
-    secure-port: "10257"
+    - name: bind-address
+      value: "0.0.0.0"
+    - name: secure-port
+      value: "10257"
 scheduler:
   extraArgs:
-    bind-address: "0.0.0.0"
-    secure-port: "10259"
+    - name: bind-address
+      value: "0.0.0.0"
+    - name: secure-port
+      value: "10259"
 etcd:
   local:
     dataDir: /var/lib/etcd
