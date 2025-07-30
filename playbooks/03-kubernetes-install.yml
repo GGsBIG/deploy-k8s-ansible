@@ -23,14 +23,13 @@
 
     - name: Add Kubernetes GPG key
       shell: |
-        curl -fsSL https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/Release.key | \
-        gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        curl -fsSL https://pkgs.k8s.io/core/lib/kubernetes-apt-keyring.gpg -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
       args:
         creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
     - name: Add Kubernetes repository
       copy:
-        content: 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/ /'
+        content: 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core/deb/ stable main'
         dest: /etc/apt/sources.list.d/kubernetes.list
 
     - name: Update apt cache
@@ -40,17 +39,17 @@
     - name: Install Kubernetes packages on masters
       apt:
         name:
-          - kubelet={{ k8s_version }}-1.1
-          - kubeadm={{ k8s_version }}-1.1
-          - kubectl={{ k8s_version }}-1.1
+          - kubelet={{ k8s_version }}
+          - kubeadm={{ k8s_version }}
+          - kubectl={{ k8s_version }}
         state: present
       when: inventory_hostname in groups['masters']
 
     - name: Install Kubernetes packages on workers
       apt:
         name:
-          - kubelet={{ k8s_version }}-1.1
-          - kubeadm={{ k8s_version }}-1.1
+          - kubelet={{ k8s_version }}
+          - kubeadm={{ k8s_version }}
         state: present
       when: inventory_hostname in groups['workers']
 
