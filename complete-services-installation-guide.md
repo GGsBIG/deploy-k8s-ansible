@@ -378,12 +378,13 @@ kubectl apply -f metallb-prometheus-config.yaml
 ```
 
 ### 3.3 創建 Prometheus Values 配置
+
+**⚠️ 實際部署說明**: 以下配置中的 `server` 部分對 kube-prometheus-stack 無效，會導致 LoadBalancer 服務無法創建。請按照後續的修復步驟操作。
+
 ```bash
 cat > prometheus-values.yaml << 'EOF'
-# Prometheus Server 配置
 prometheus:
   prometheusSpec:
-    # 資源配置
     resources:
       requests:
         memory: 1Gi
@@ -392,7 +393,6 @@ prometheus:
         memory: 2Gi
         cpu: 1000m
     
-    # 存儲配置
     storageSpec:
       volumeClaimTemplate:
         spec:
@@ -402,19 +402,15 @@ prometheus:
             requests:
               storage: 50Gi
     
-    # 保留時間
     retention: 30d
     retentionSize: 45GB
     
-    # 外部 URL
     externalUrl: http://172.21.169.75:9090
     
-    # 服務發現配置
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
     
-    # 額外的 scrape 配置
     additionalScrapeConfigs:
     - job_name: 'kubernetes-pods'
       kubernetes_sd_configs:
@@ -433,7 +429,6 @@ prometheus:
         replacement: $1:$2
         target_label: __address__
 
-# Prometheus Server Service 配置
 server:
   service:
     type: LoadBalancer
@@ -442,7 +437,6 @@ server:
       metallb.universe.tf/loadBalancerIPs: "172.21.169.75"
     port: 9090
 
-# AlertManager 配置
 alertmanager:
   enabled: true
   alertmanagerSpec:
@@ -462,19 +456,15 @@ alertmanager:
             requests:
               storage: 5Gi
 
-# Grafana 整合（暫時禁用，稍後單獨安裝）
 grafana:
   enabled: false
 
-# Node Exporter 配置
 nodeExporter:
   enabled: true
 
-# Kube State Metrics 配置
 kubeStateMetrics:
   enabled: true
 
-# 服務監控器
 defaultRules:
   create: true
   rules:
@@ -502,7 +492,6 @@ defaultRules:
     prometheus: true
     prometheusOperator: true
 
-# RBAC 配置
 rbac:
   create: true
 EOF
@@ -532,7 +521,82 @@ kubectl get pvc -n monitoring
 curl http://172.21.169.75:9090
 ```
 
-### 3.6 配置 Nginx Ingress 規則（可選）
+### 3.6 LoadBalancer 問題修復
+
+**⚠️ 重要：實際部署經驗**
+
+使用上述配置安裝後，Prometheus 服務只會創建為 ClusterIP 類型，無法通過 LoadBalancer IP 訪問。這是因為 `server` 配置對 `kube-prometheus-stack` 無效。
+
+#### 問題現象：
+```bash
+# 檢查服務會發現只有 ClusterIP 類型
+systex@hcch-k8s-ms01:~$ kubectl get svc -n monitoring | grep prometheus
+prometheus-kube-prometheus-prometheus     ClusterIP   10.96.4.48      <none>        9090/TCP,8080/TCP
+
+# 測試訪問會失敗
+systex@hcch-k8s-ms01:~$ curl http://172.21.169.75:9090
+curl: (7) Failed to connect to 172.21.169.75 port 9090: No route to host
+```
+
+#### 解決方案（已驗證有效）：
+
+**方法一：手動創建 LoadBalancer 服務（推薦）**
+```bash
+cat > prometheus-loadbalancer.yaml << 'EOF'
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-external
+  namespace: monitoring
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: "172.21.169.75"
+spec:
+  type: LoadBalancer
+  loadBalancerIP: "172.21.169.75"
+  ports:
+  - name: web
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/instance: prometheus-kube-prometheus-prometheus
+EOF
+
+kubectl apply -f prometheus-loadbalancer.yaml
+```
+
+**方法二：使用正確的 Helm 配置（完整修復）**
+```bash
+# 如果選擇重新安裝，請修改 prometheus-values.yaml：
+# 刪除原始配置中的 server 部分，改為：
+prometheus:
+  service:
+    type: LoadBalancer
+    loadBalancerIP: "172.21.169.75"
+    annotations:
+      metallb.universe.tf/loadBalancerIPs: "172.21.169.75"
+    port: 9090
+```
+
+#### 驗證修復：
+```bash
+# 檢查新服務
+kubectl get svc -n monitoring prometheus-external
+
+# 預期結果：
+# NAME                  TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)          AGE
+# prometheus-external   LoadBalancer   10.96.xxx.xxx   172.21.169.75   9090:xxxxx/TCP   30s
+
+# 測試訪問
+curl -I http://172.21.169.75:9090
+# 預期返回：HTTP/1.1 200 OK
+
+# 檢查監控目標
+curl -s http://172.21.169.75:9090/api/v1/targets | jq '.data.activeTargets[] | .health' | grep up
+```
+
+### 3.7 配置 Nginx Ingress 規則（可選）
 ```bash
 cat > prometheus-ingress.yaml << 'EOF'
 apiVersion: networking.k8s.io/v1
@@ -552,7 +616,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: prometheus-kube-prometheus-prometheus
+            name: prometheus-external
             port:
               number: 9090
 EOF
@@ -985,6 +1049,23 @@ echo "Login: admin / Grafana123!"
 # 故障排除
 
 ## 常見問題及解決方案
+
+### 0. Prometheus LoadBalancer 無法訪問
+```bash
+# 問題：使用 kube-prometheus-stack 時 LoadBalancer IP 無法訪問
+# 原因：server 配置無效，服務創建為 ClusterIP 類型
+
+# 診斷步驟：
+kubectl get svc -n monitoring | grep prometheus
+# 如果只顯示 ClusterIP 類型，則需要手動創建 LoadBalancer 服務
+
+# 解決方案：
+kubectl apply -f prometheus-loadbalancer.yaml  # 使用上述修復配置
+
+# 驗證：
+kubectl get svc -n monitoring prometheus-external
+curl -I http://172.21.169.75:9090
+```
 
 ### 1. IP 地址無法分配
 ```bash
@@ -2076,13 +2157,30 @@ rm -f *.yaml
 
 ---
 
-# 總結
+# 實際部署經驗總結
 
-完成以上步驟後，你將擁有：
+## 已知問題和解決方案
+
+### Prometheus LoadBalancer 配置問題
+- **問題**：原始配置中的 `server` 部分對 kube-prometheus-stack 無效
+- **現象**：服務創建為 ClusterIP 而非 LoadBalancer，IP 無法訪問
+- **解決方案**：手動創建 LoadBalancer 服務或修正 Helm values
+- **狀態**：✅ 已解決並驗證
+
+### 配置結構差異
+- **錯誤配置**：`server.service` (來自標準 Prometheus chart)
+- **正確配置**：`prometheus.service` (適用於 kube-prometheus-stack)
+- **教訓**：不同 Helm Chart 有不同配置結構，需查閱官方文檔
+
+---
+
+# 最終部署狀態
+
+完成以上步驟並應用修復後，你將擁有：
 
 ✅ **Nginx Ingress Controller** (172.21.169.73) - HTTP/HTTPS 路由
 ✅ **Istio Ingress Gateway** (172.21.169.72) - 服務網格入口  
-✅ **Prometheus** (172.21.169.75:9090) - 監控數據收集
+✅ **Prometheus** (172.21.169.75:9090) - 監控數據收集 **[已修復 LoadBalancer 問題]**
 ✅ **Grafana** (172.21.169.74) - 監控視覺化
 ✅ **Jaeger UI** (172.21.169.82:16686) - 分散式追蹤
 ✅ **Kiali** (172.21.169.77:20001) - 服務網格視覺化
@@ -2091,3 +2189,5 @@ rm -f *.yaml
 ✅ **Swagger UI** (172.21.169.79:8080) - API 文件和測試
 
 所有服務都配置了固定 IP 地址，並且整合了完整的監控、日誌、追蹤和管理功能，構成了一個完整的微服務可觀測性平台。
+
+**實際部署驗證**：Prometheus 已成功通過手動 LoadBalancer 服務實現 172.21.169.75:9090 訪問，所有監控目標健康狀態良好。
