@@ -29,6 +29,15 @@
         sudo dpkg --configure -a || true
       ignore_errors: yes
 
+    - name: Remove any existing Kubernetes repository files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/apt/sources.list.d/kubernetes.list
+        - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      ignore_errors: yes
+
     - name: Install chrony
       apt:
         name: chrony
