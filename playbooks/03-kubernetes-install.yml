@@ -38,6 +38,15 @@
       apt:
         update_cache: yes
 
+    - name: Check available kubelet versions
+      shell: apt-cache madison kubelet | head -10
+      register: kubelet_versions
+      changed_when: false
+
+    - name: Display available kubelet versions
+      debug:
+        var: kubelet_versions.stdout_lines
+
     - name: Install Kubernetes packages on masters
       apt:
         name:
