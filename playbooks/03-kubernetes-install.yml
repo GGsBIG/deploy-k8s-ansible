@@ -40,17 +40,17 @@
     - name: Install Kubernetes packages on masters
       apt:
         name:
-          - kubelet={{ k8s_version }}.4-1.1
-          - kubeadm={{ k8s_version }}.4-1.1
-          - kubectl={{ k8s_version }}.4-1.1
+          - kubelet={{ k8s_version }}-1.1
+          - kubeadm={{ k8s_version }}-1.1
+          - kubectl={{ k8s_version }}-1.1
         state: present
       when: inventory_hostname in groups['masters']
 
     - name: Install Kubernetes packages on workers
       apt:
         name:
-          - kubelet={{ k8s_version }}.4-1.1
-          - kubeadm={{ k8s_version }}.4-1.1
+          - kubelet={{ k8s_version }}-1.1
+          - kubeadm={{ k8s_version }}-1.1
         state: present
       when: inventory_hostname in groups['workers']
 

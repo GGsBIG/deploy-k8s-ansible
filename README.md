@@ -189,7 +189,7 @@ chmod +x /deploy-k8s-ansible/deploy.sh
 
 ## Version Information
 
-- Kubernetes: 1.31
-- Containerd: 1.7.27
+- Kubernetes: 1.33.3
+- Containerd: 2.1.3
 - Calico: v3.30.2
 - kube-vip: Latest version
