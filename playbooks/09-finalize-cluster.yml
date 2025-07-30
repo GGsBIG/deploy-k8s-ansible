@@ -46,6 +46,23 @@
       debug:
         var: final_pods.stdout_lines
 
+    - name: Create kube-vip cloud provider configuration
+      copy:
+        content: |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: kubevip
+            namespace: kube-system
+          data:
+            range-global: 172.21.169.71-172.21.169.82
+        dest: /tmp/kube-vip-cloud-config.yaml
+
+    - name: Apply kube-vip cloud provider configuration
+      shell: kubectl apply -f /tmp/kube-vip-cloud-config.yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+
     - name: Display cluster information
       debug:
         msg: |

@@ -31,6 +31,7 @@
           --address {{ kube_vip_ip }} \
           --interface {{ kube_vip_interface }} \
           --controlplane \
+          --services \
           --arp \
           --leaderElection > /etc/kubernetes/manifests/kube-vip.yaml
 
