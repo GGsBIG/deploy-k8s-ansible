@@ -34,12 +34,11 @@
         dest: "/tmp/containerd-{{ containerd_version }}-linux-amd64.tar.gz"
         mode: '0644'
 
-    - name: Download containerd service file (from main branch)
-      get_url:
-        url: "https://raw.githubusercontent.com/containerd/containerd/main/containerd.service"
+    - name: Copy containerd service file
+      copy:
+        src: containerd.service
         dest: "/tmp/containerd.service"
         mode: '0644'
-        validate_certs: false
 
     - name: Extract containerd binary
       unarchive:

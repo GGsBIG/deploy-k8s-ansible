@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(rm:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ],
     "deny": []
   }
