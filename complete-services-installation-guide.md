@@ -662,10 +662,8 @@ helm repo update
 ### 4.3 創建 Grafana Values 配置
 ```bash
 cat > grafana-values.yaml << 'EOF'
-# 副本配置
 replicas: 1
 
-# 資源配置
 resources:
   limits:
     cpu: 500m
@@ -674,7 +672,6 @@ resources:
     cpu: 250m
     memory: 256Mi
 
-# 持久化存儲
 persistence:
   enabled: true
   storageClassName: nfs-storage
@@ -682,7 +679,6 @@ persistence:
   accessModes:
     - ReadWriteOnce
 
-# Service 配置
 service:
   type: LoadBalancer
   loadBalancerIP: "172.21.169.74"
@@ -691,11 +687,9 @@ service:
   annotations:
     metallb.universe.tf/loadBalancerIPs: "172.21.169.74"
 
-# 管理員配置
 adminUser: admin
 adminPassword: Grafana123!
 
-# Grafana 配置
 grafana.ini:
   server:
     root_url: http://172.21.169.74
@@ -709,7 +703,6 @@ grafana.ini:
   dashboards:
     default_home_dashboard_path: /var/lib/grafana/dashboards/kubernetes-cluster-monitoring.json
 
-# 資料源配置
 datasources:
   datasources.yaml:
     apiVersion: 1
@@ -728,7 +721,6 @@ datasources:
       url: http://prometheus-kube-prometheus-alertmanager.monitoring.svc.cluster.local:9093
       access: proxy
 
-# 儀表板提供者
 dashboardProviders:
   dashboardproviders.yaml:
     apiVersion: 1
@@ -752,25 +744,20 @@ dashboardProviders:
       options:
         path: /var/lib/grafana/dashboards/istio
 
-# 預設儀表板
 dashboards:
   kubernetes:
-    # Kubernetes 叢集監控
     kubernetes-cluster-monitoring:
       gnetId: 7249
       revision: 1
       datasource: Prometheus
-    # Node Exporter 完整
     node-exporter-full:
       gnetId: 1860
       revision: 31
       datasource: Prometheus
-    # Kubernetes 部署監控
     kubernetes-deployment:
       gnetId: 8588
       revision: 1
       datasource: Prometheus
-    # Kubernetes Pod 監控
     kubernetes-pods:
       gnetId: 6336
       revision: 1
@@ -781,45 +768,37 @@ dashboards:
       gnetId: 7645
       revision: 75
       datasource: Prometheus
-    # Istio 服務儀表板
     istio-service:
       gnetId: 7636
       revision: 75
       datasource: Prometheus
-    # Istio 工作負載儀表板
     istio-workload:
       gnetId: 7630
       revision: 75
       datasource: Prometheus
 
-# 插件配置
 plugins:
   - grafana-piechart-panel
   - grafana-worldmap-panel
   - grafana-clock-panel
 
-# 環境變數
 env:
   GF_EXPLORE_ENABLED: true
   GF_PANELS_DISABLE_SANITIZE_HTML: true
   GF_LOG_FILTERS: rendering:debug
 
-# RBAC 配置
 rbac:
   create: true
   pspEnabled: false
 
-# ServiceAccount 配置
 serviceAccount:
   create: true
 
-# 安全上下文
 securityContext:
   runAsUser: 472
   runAsGroup: 472
   fsGroup: 472
 
-# 初始化容器（預載儀表板）
 initChownData:
   enabled: true
   resources:
@@ -1178,120 +1157,348 @@ kubectl wait --for=condition=available deployment/jaeger-operator -n observabili
 ```
 
 ### 5.3 創建 Jaeger 實例配置
+
+**⚠️ 實際部署經驗**：原始的生產環境配置（使用 Elasticsearch）會導致 Pod CrashLoopBackOff，因為需要額外安裝和配置 Elasticsearch。推薦使用內存存儲版本，穩定且快速啟動。
+
+#### 5.3.1 使用內存存儲版本（推薦）
+
 ```bash
-cat > jaeger-instance.yaml << 'EOF'
+cat > jaeger-memory-production.yaml << 'EOF'
 apiVersion: jaegertracing.io/v1
 kind: Jaeger
 metadata:
   name: jaeger-production
   namespace: observability
 spec:
-  strategy: production
-  
-  # Collector 配置
-  collector:
-    replicas: 2
+  strategy: allInOne
+  allInOne:
+    image: jaegertracing/all-in-one:1.57
     resources:
       requests:
-        cpu: 200m
-        memory: 256Mi
-      limits:
-        cpu: 500m
+        cpu: 300m
         memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
     options:
+      memory:
+        max-traces: 100000
+      query:
+        base-path: /
       collector:
         zipkin:
           host-port: ":9411"
-  
-  # Query 服務配置（UI）
-  query:
-    replicas: 2
-    resources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-      limits:
-        cpu: 200m
-        memory: 256Mi
-    options:
-      query:
-        base-path: /
-    service:
-      type: LoadBalancer
-      loadBalancerIP: "172.21.169.82"
-      annotations:
-        metallb.universe.tf/loadBalancerIPs: "172.21.169.82"
-      ports:
-      - name: query-http
-        port: 16686
-        targetPort: 16686
-  
-  # Agent 配置
-  agent:
-    strategy: DaemonSet  # 在每個節點運行
-    resources:
-      requests:
-        cpu: 50m
-        memory: 64Mi
-      limits:
-        cpu: 100m
-        memory: 128Mi
-  
-  # 存儲配置
   storage:
-    type: elasticsearch
-    elasticsearch:
-      nodeCount: 1
-      redundancyPolicy: ZeroRedundancy
-      resources:
-        requests:
-          cpu: 500m
-          memory: 1Gi
-        limits:
-          cpu: 1000m
-          memory: 2Gi
-      storage:
-        storageClassName: nfs-storage
-        size: 20Gi
-    options:
-      es:
-        server-urls: http://elasticsearch:9200
-        index-prefix: jaeger
+    type: memory
 EOF
 
-kubectl apply -f jaeger-instance.yaml
+kubectl apply -f jaeger-memory-production.yaml
 ```
 
-### 5.4 配置 Istio 與 Jaeger 整合
+#### 5.3.2 等待 Jaeger Pod 啟動
+
 ```bash
-# 更新 Istio 配置啟用 Jaeger 追蹤
-kubectl patch configmap istio -n istio-system --type merge -p '{
-  "data": {
-    "mesh": "defaultConfig:\n  proxyStatsMatcher:\n    inclusionRegexps:\n    - \".*outlier_detection.*\"\n    - \".*circuit_breakers.*\"\n    - \".*upstream_rq_retry.*\"\n    - \".*_cx_.*\"\ndefaultProviders:\n  tracing:\n  - jaeger\nextensionProviders:\n- name: jaeger\n  envoyExtAuthzHttp:\n    service: jaeger-production-collector.observability.svc.cluster.local\n    port: 14268\n  zipkin:\n    service: jaeger-production-collector.observability.svc.cluster.local\n    port: 9411"
+echo "等待 Jaeger Pod 啟動..."
+kubectl wait --for=condition=ready pod -l app=jaeger -n observability --timeout=120s
+
+echo "檢查 Pod 狀態："
+kubectl get pods -n observability
+
+echo "檢查服務："
+kubectl get svc -n observability
+```
+
+#### 5.3.3 創建 LoadBalancer 服務
+
+**⚠️ 重要**：Jaeger Operator 不支持在 CRD 中直接配置 LoadBalancer 服務，需要手動創建外部服務。
+
+```bash
+cat > jaeger-loadbalancer-service.yaml << 'EOF'
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger-external
+  namespace: observability
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: "172.21.169.82"
+spec:
+  type: LoadBalancer
+  loadBalancerIP: "172.21.169.82"
+  ports:
+  - name: query-http
+    port: 16686
+    targetPort: 16686
+    protocol: TCP
+  - name: collector-grpc
+    port: 14250
+    targetPort: 14250
+    protocol: TCP
+  - name: collector-http
+    port: 14268
+    targetPort: 14268
+    protocol: TCP
+  - name: zipkin
+    port: 9411
+    targetPort: 9411
+    protocol: TCP
+  - name: admin
+    port: 14269
+    targetPort: 14269
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: jaeger-production
+    app.kubernetes.io/component: all-in-one
+EOF
+
+kubectl apply -f jaeger-loadbalancer-service.yaml
+```
+
+#### 5.3.4 等待 LoadBalancer IP 分配
+
+```bash
+echo "等待 LoadBalancer IP 分配..."
+kubectl wait --for=jsonpath='{.status.loadBalancer.ingress[0].ip}' service/jaeger-external -n observability --timeout=60s
+
+echo "檢查 LoadBalancer 狀態："
+kubectl get svc jaeger-external -n observability
+```
+
+### 5.4 LoadBalancer 服務問題修復
+
+**⚠️ 常見問題**：如果創建 LoadBalancer 服務後無法訪問 Jaeger UI，通常是服務選擇器與 Pod 標籤不匹配導致的。
+
+#### 5.4.1 診斷步驟
+
+```bash
+echo "=== 檢查 Pod 實際標籤 ==="
+kubectl get pods -n observability --show-labels | grep jaeger
+
+echo "=== 檢查服務端點 ==="
+kubectl get endpoints -n observability | grep jaeger
+
+echo "=== 測試連通性 ==="
+curl -I http://172.21.169.82:16686
+```
+
+#### 5.4.2 修復服務選擇器（如有需要）
+
+```bash
+# 如果上述測試失敗，更新服務選擇器
+kubectl patch svc jaeger-external -n observability -p '{
+  "spec": {
+    "selector": {
+      "app.kubernetes.io/name": "jaeger-production"
+    }
   }
 }'
 
-# 重啟 Istio 組件以應用配置
-kubectl rollout restart deployment/istiod -n istio-system
-kubectl rollout restart daemonset/istio-proxy -n istio-system || true
+# 等待端點更新
+sleep 5
+
+# 重新測試
+curl -I http://172.21.169.82:16686
 ```
 
-### 5.5 驗證 Jaeger 安裝
+### 5.5 配置 Istio 與 Jaeger 整合
+
 ```bash
-# 檢查 Jaeger 組件
+cat > istio-jaeger-tracing.yaml << 'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: istio
+  namespace: istio-system
+data:
+  mesh: |
+    defaultConfig:
+      proxyStatsMatcher:
+        inclusionRegexps:
+        - ".*outlier_detection.*"
+        - ".*circuit_breakers.*"
+        - ".*upstream_rq_retry.*"
+        - ".*_cx_.*"
+      tracing:
+        zipkin:
+          address: jaeger-production-collector.observability.svc.cluster.local:9411
+    defaultProviders:
+      tracing:
+      - jaeger
+    extensionProviders:
+    - name: jaeger
+      zipkin:
+        service: jaeger-production-collector.observability.svc.cluster.local
+        port: 9411
+EOF
+
+kubectl apply -f istio-jaeger-tracing.yaml
+
+# 重啟 Istio 控制平面
+kubectl rollout restart deployment/istiod -n istio-system
+
+echo "等待 Istio 重啟完成..."
+kubectl wait --for=condition=available deployment/istiod -n istio-system --timeout=120s
+```
+
+### 5.6 驗證 Jaeger 安裝
+
+```bash
+echo "=== 驗證 Jaeger 部署狀態 ==="
+
+echo "1. Pod 狀態："
 kubectl get pods -n observability
 
-# 檢查 Jaeger 服務
+echo "2. 服務狀態："
 kubectl get svc -n observability
 
-# 測試 Jaeger UI
-curl -I http://172.21.169.82:16686
-
-# 檢查 Elasticsearch
-kubectl get pods -n observability | grep elasticsearch
+echo "3. LoadBalancer IP："
+kubectl get svc jaeger-external -n observability -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+echo
 ```
 
-### 5.6 配置 Nginx Ingress 規則（可選）
+### 5.7 測試連通性和功能
+
+```bash
+echo "=== 測試所有端點連通性 ==="
+
+echo "測試 Jaeger UI (16686)..."
+curl -I http://172.21.169.82:16686
+
+echo "測試收集器 HTTP (14268)..."
+curl -I http://172.21.169.82:14268
+
+echo "測試 Zipkin (9411)..."
+curl -I http://172.21.169.82:9411
+
+echo "測試管理端點 (14269)..."
+curl -s http://172.21.169.82:14269/metrics | head -3
+
+echo "測試 API..."
+curl -s http://172.21.169.82:16686/api/services
+
+echo ""
+echo "瀏覽器訪問: http://172.21.169.82:16686"
+```
+
+### 5.8 部署測試應用驗證追蹤功能
+
+```bash
+echo "=== 部署測試應用 ==="
+
+cat > jaeger-test-apps.yaml << 'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: productpage
+  namespace: default
+  labels:
+    app: productpage
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: productpage
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: productpage
+        version: v1
+    spec:
+      containers:
+      - name: productpage
+        image: nginx:1.21
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: productpage
+  namespace: default
+spec:
+  ports:
+  - port: 9080
+    targetPort: 80
+    name: http
+  selector:
+    app: productpage
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: details
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: details
+  template:
+    metadata:
+      labels:
+        app: details
+    spec:
+      containers:
+      - name: details
+        image: httpd:2.4
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: details
+  namespace: default
+spec:
+  ports:
+  - port: 9080
+    targetPort: 80
+    name: http
+  selector:
+    app: details
+EOF
+
+kubectl apply -f jaeger-test-apps.yaml
+
+# 為 default 命名空間啟用 Istio 注入
+kubectl label namespace default istio-injection=enabled --overwrite
+
+# 重啟應用以注入 sidecar
+kubectl rollout restart deployment/productpage -n default
+kubectl rollout restart deployment/details -n default
+
+# 等待應用重啟
+kubectl wait --for=condition=ready pod -l app=productpage -n default --timeout=60s
+kubectl wait --for=condition=ready pod -l app=details -n default --timeout=60s
+```
+
+### 5.9 生成測試流量
+
+```bash
+echo "=== 生成測試流量 ==="
+
+# 等待 sidecar 就緒
+sleep 10
+
+echo "生成測試請求..."
+for i in {1..20}; do
+  echo "發送請求 $i..."
+  kubectl exec -n default deployment/productpage -- curl -s details:9080/ > /dev/null
+  sleep 1
+done
+
+echo "測試流量生成完成！"
+
+# 檢查追蹤數據
+echo "等待追蹤數據傳輸..."
+sleep 10
+
+echo "檢查 Jaeger 中的服務："
+curl -s http://172.21.169.82:16686/api/services | jq -r '.data[]' 2>/dev/null || curl -s http://172.21.169.82:16686/api/services
+```
+
+### 5.10 配置 Nginx Ingress 規則（可選）
 ```bash
 cat > jaeger-ingress.yaml << 'EOF'
 apiVersion: networking.k8s.io/v1
@@ -1311,19 +1518,47 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: jaeger-production-query
+            name: jaeger-external
             port:
               number: 16686
 EOF
 
 kubectl apply -f jaeger-ingress.yaml
+
+# 測試 Ingress 訪問
+echo "測試 Nginx Ingress 訪問："
+curl -H "Host: jaeger.172.21.169.73.nip.io" http://172.21.169.73
 ```
+
+### 5.11 Jaeger 部署經驗總結
+
+**✅ 成功部署指標**：
+- Jaeger Pod 狀態為 `1/1 Running`
+- LoadBalancer 服務分配到 `172.21.169.82`
+- 可以訪問 `http://172.21.169.82:16686`
+- 測試應用產生追蹤數據可見
+- Jaeger UI 中可以看到服務列表
+
+**⚠️ 實際部署經驗**：
+1. **存儲選擇**：內存存儲比 Elasticsearch 更穩定，適合測試和中小規模部署
+2. **服務配置**：LoadBalancer 服務必須手動創建，CRD 不支持直接配置
+3. **標籤匹配**：服務選擇器必須與 Pod 標籤精確匹配
+4. **Istio 整合**：需要正確配置 Zipkin 端點才能收集追蹤數據
+5. **測試重要性**：部署測試應用是驗證功能的關鍵步驟
+
+**🚨 常見問題和解決方案**：
+- Pod CrashLoopBackOff → 使用內存存儲替代 Elasticsearch
+- UI 無法訪問 → 檢查服務選擇器和端點狀態
+- 沒有追蹤數據 → 確認 Istio sidecar 注入和配置
+- LoadBalancer IP 未分配 → 檢查 MetalLB 狀態和 IP 地址池
 
 ---
 
 # 第五階段：服務網格可觀測性
 
 ## 6. Kiali 安裝 (172.21.169.77:20001)
+
+**⚠️ 前置條件**：確保 Jaeger 已正常運行，因為 Kiali 需要與 Jaeger 整合來顯示追蹤信息。
 
 ### 6.1 配置 MetalLB 為 Kiali 分配 IP
 ```bash
@@ -1374,14 +1609,11 @@ metadata:
   name: kiali
   namespace: istio-system
 spec:
-  # 安裝配置
   installation_tag: "v1.86.0"
   
-  # 認證配置
   auth:
-    strategy: "anonymous"  # 生產環境建議使用 "openshift" 或 "token"
+    strategy: "anonymous"
   
-  # 部署配置
   deployment:
     replicas: 1
     resources:
@@ -1392,37 +1624,29 @@ spec:
         cpu: 500m
         memory: 512Mi
     
-    # Service 配置
     service_type: "LoadBalancer"
     service_annotations:
       metallb.universe.tf/loadBalancerIPs: "172.21.169.77"
     load_balancer_ip: "172.21.169.77"
     
-    # 自定義端口
     http_port: 20001
     
-  # 外部服務配置
   external_services:
-    # Prometheus 配置
     prometheus:
       url: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
       
-    # Grafana 配置
     grafana:
       enabled: true
       url: "http://grafana.monitoring.svc.cluster.local"
       in_cluster_url: "http://grafana.monitoring.svc.cluster.local"
       
-    # Jaeger 配置
     tracing:
       enabled: true
       in_cluster_url: "http://jaeger-production-query.observability.svc.cluster.local:16686"
       url: "http://172.21.169.82:16686"
       
-  # Istio 配置
   istio_namespace: "istio-system"
   
-  # API 配置
   api:
     namespaces:
       exclude:
@@ -1431,13 +1655,11 @@ spec:
       - "metallb-system"
       - "nfs"
       
-  # 伺服器配置
   server:
     web_root: "/"
     web_fqdn: "172.21.169.77"
     web_port: 20001
     
-  # 額外配置
   kiali_feature_flags:
     certificates_information_indicators:
       enabled: true
@@ -1519,11 +1741,9 @@ helm repo update
 ### 7.3 安裝 Elasticsearch
 ```bash
 cat > elasticsearch-values.yaml << 'EOF'
-# Elasticsearch 配置
 replicas: 1
 minimumMasterNodes: 1
 
-# 資源配置
 resources:
   requests:
     cpu: 500m
@@ -1532,10 +1752,8 @@ resources:
     cpu: 1000m
     memory: 2Gi
 
-# JVM 設定
 esJavaOpts: "-Xmx1g -Xms1g"
 
-# 持久化存儲
 persistence:
   enabled: true
   storageClass: "nfs-storage"
@@ -1543,23 +1761,19 @@ persistence:
     - ReadWriteOnce
   size: 30Gi
 
-# 叢集設定
 clusterName: "elasticsearch"
 nodeGroup: "master"
 
-# 安全設定
 esConfig:
   elasticsearch.yml: |
     xpack.security.enabled: false
     xpack.security.transport.ssl.enabled: false
     xpack.security.http.ssl.enabled: false
 
-# Service 配置
 service:
   type: ClusterIP
   port: 9200
 
-# 健康檢查
 readinessProbe:
   failureThreshold: 3
   initialDelaySeconds: 10
@@ -1578,13 +1792,10 @@ helm install elasticsearch elastic/elasticsearch \
 ### 7.4 安裝 Kibana
 ```bash
 cat > kibana-values.yaml << 'EOF'
-# Elasticsearch 連接配置
 elasticsearchHosts: "http://elasticsearch-master.logging.svc.cluster.local:9200"
 
-# 副本配置
 replicas: 1
 
-# 資源配置
 resources:
   requests:
     cpu: 500m
@@ -1593,7 +1804,6 @@ resources:
     cpu: 1000m
     memory: 2Gi
 
-# Service 配置
 service:
   type: LoadBalancer
   loadBalancerIP: "172.21.169.71"
@@ -1601,7 +1811,6 @@ service:
   annotations:
     metallb.universe.tf/loadBalancerIPs: "172.21.169.71"
 
-# Kibana 配置
 kibanaConfig:
   kibana.yml: |
     server.host: "0.0.0.0"
@@ -1609,33 +1818,26 @@ kibanaConfig:
     elasticsearch.hosts: ["http://elasticsearch-master.logging.svc.cluster.local:9200"]
     server.publicBaseUrl: "http://172.21.169.71:5601"
     
-    # 安全設定
     xpack.security.enabled: false
     xpack.encryptedSavedObjects.encryptionKey: "fhjskloppd678ehkdfdlliverpoolfcr"
     
-    # 預設索引模式
     kibana.index: ".kibana"
     
-    # 日誌設定
     logging.dest: stdout
     logging.silent: false
     logging.quiet: false
     logging.verbose: true
 
-# 環境變數
 extraEnvs:
   - name: "NODE_OPTIONS"
     value: "--max-old-space-size=1800"
   - name: "KIBANA_SYSTEM_PASSWORD"
     value: "kibana123"
 
-# 健康檢查
 healthCheckPath: "/app/kibana"
 
-# 額外配置
 serverHost: "0.0.0.0"
 
-# 生命週期鉤子
 lifecycle:
   preStop:
     exec:
@@ -1651,11 +1853,9 @@ helm install kibana elastic/kibana \
 ### 7.5 安裝 Filebeat（日誌收集器）
 ```bash
 cat > filebeat-values.yaml << 'EOF'
-# DaemonSet 配置
 deployment:
   replicas: 1
 
-# 資源配置
 resources:
   requests:
     cpu: 100m
@@ -1664,7 +1864,6 @@ resources:
     cpu: 200m
     memory: 200Mi
 
-# Filebeat 配置
 filebeatConfig:
   filebeat.yml: |
     filebeat.inputs:
@@ -1693,7 +1892,6 @@ filebeatConfig:
     setup.kibana:
       host: "http://kibana-kibana.logging.svc.cluster.local:5601"
 
-# 掛載配置
 extraVolumes:
   - name: varlog
     hostPath:
@@ -1710,7 +1908,6 @@ extraVolumeMounts:
     mountPath: /var/lib/docker/containers
     readOnly: true
 
-# 環境變數
 extraEnvs:
   - name: NODE_NAME
     valueFrom:
