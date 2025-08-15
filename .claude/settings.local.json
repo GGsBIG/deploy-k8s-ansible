@@ -5,6 +5,7 @@
       "Bash(chmod:*)",
       "WebFetch(domain:raw.githubusercontent.com)"
     ],
-    "deny": []
+    "deny": [],
+    "defaultMode": "acceptEdits"
   }
 }

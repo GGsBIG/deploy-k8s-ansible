@@ -5,6 +5,10 @@
   gather_facts: yes
   
   tasks:
+    - name: Wait for unattended-upgrades to finish
+      shell: while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do echo "Waiting for dpkg lock..."; sleep 5; done
+      changed_when: false
+
     - name: Install required packages
       apt:
         name:
@@ -14,6 +18,10 @@
           - gpg
         state: present
         update_cache: yes
+      retries: 5
+      delay: 30
+      register: apt_result
+      until: apt_result is succeeded
 
     - name: Create keyrings directory
       file:
@@ -37,6 +45,10 @@
     - name: Update apt cache
       apt:
         update_cache: yes
+      retries: 5
+      delay: 30
+      register: apt_update_result
+      until: apt_update_result is succeeded
 
     - name: Check available kubelet versions
       shell: apt-cache madison kubelet | head -10
@@ -55,6 +67,10 @@
           - kubectl={{ k8s_version }}
         state: present
       when: inventory_hostname in groups['masters']
+      retries: 5
+      delay: 30
+      register: k8s_masters_result
+      until: k8s_masters_result is succeeded
 
     - name: Install Kubernetes packages on workers
       apt:
@@ -63,6 +79,10 @@
           - kubeadm={{ k8s_version }}
         state: present
       when: inventory_hostname in groups['workers']
+      retries: 5
+      delay: 30
+      register: k8s_workers_result
+      until: k8s_workers_result is succeeded
 
     - name: Hold Kubernetes packages on masters
       shell: apt-mark hold kubelet kubeadm kubectl

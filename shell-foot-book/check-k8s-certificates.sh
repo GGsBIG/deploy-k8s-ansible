@@ -18,6 +18,13 @@ calculate_days() {
     echo $(( (expiry_epoch - current_epoch) / 86400 ))
 }
 
+get_worker_nodes() {
+    local inventory_file="/Users/tianjiasong/deploy-k8s-ansible/inventory.ini"
+    if [ -f "$inventory_file" ]; then
+        awk '/^\[workers\]/,/^\[/ {if(!/^\[/ && !/^$/ && !/^#/) print $2}' "$inventory_file" | sed 's/ansible_host=//'
+    fi
+}
+
 restart_k8s_components() {
     echo "Restarting Kubernetes components..."
     
@@ -29,7 +36,26 @@ restart_k8s_components() {
     systemctl restart kubelet
     
     echo "Master node components restarted"
-    echo "$(date): K8s components restarted on master" >> "$LOG_FILE"
+    
+    # Get worker nodes and restart services
+    echo "Restarting worker node services..."
+    local worker_ips=$(get_worker_nodes)
+    
+    if [ -n "$worker_ips" ]; then
+        for worker_ip in $worker_ips; do
+            echo "Restarting services on worker: $worker_ip"
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 systex@$worker_ip "echo 'Systex123!' | sudo -S systemctl restart containerd.service && echo 'Systex123!' | sudo -S systemctl restart kubelet" 2>/dev/null
+            if [ $? -eq 0 ]; then
+                echo "✓ Worker $worker_ip restarted successfully"
+            else
+                echo "✗ Failed to restart worker $worker_ip"
+            fi
+        done
+    else
+        echo "No worker nodes found in inventory file"
+    fi
+    
+    echo "$(date): K8s components restarted on all nodes" >> "$LOG_FILE"
 }
 
 if [ ! -d "/etc/kubernetes/pki" ]; then
